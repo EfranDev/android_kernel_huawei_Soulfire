@@ -1,0 +1,39 @@
+/*Add synaptics new driver "Synaptics DSX I2C V2.0"*/
+&soc{
+	i2c@f9923000{
+		synaptics@70 {
+			compatible = "synaptics,rmi4";
+			reg = <0x70>;
+			interrupt-parent = <&msmgpio>;
+			interrupts = <1 0x2>;
+			vdd-supply = <&pm8110_l19>;
+			vcc_i2c-supply = <&pm8110_l14>;
+			synaptics,vdd = "vdd";
+			synaptics,vbus = "vcc_i2c";
+			synaptics,reset_gpio_num = <0>;
+			synaptics,irq_gpio_num = <1>;
+			synaptics,irq_gpio_polarity = <0>;/*attn_polarity =RMI_ATTN_ACTIVE_LOW,add irq trigger=IRQF_TRIGGER_FALLING*/
+			
+			synaptics,lcd-x = <720>;
+			synaptics,lcd-y = <1280>;
+			synaptics,lcd-all = <1369>;
+			synaptics,virtual_keys = /* KeyCode CenterX CenterY Width Height */
+				/* KEY_BACK */
+				<158 142 1342 150 100
+				/* KEY_HOME(102) */
+				102 360 1342 150 100
+				/* KEY_MENU */
+				139 578 1342 150 100>;
+
+			synaptics,reset-delay-ms = <50>;
+			synaptics,reset-active-ms = <90>;
+			synaptics,power-delay-ms = <160>;
+			synaptics,pr-version = <1564722>;
+			/*Poision:TP-COF = 0x0,TP_COB = 0x1,TP_MAX = 0xF*/
+			synaptics,ic-name = <3207>;
+			synaptics,ic-position = <0x0>;
+			synaptics,firmware-name = "synaptics_fw_g630.img";
+		};
+	};
+};
+
