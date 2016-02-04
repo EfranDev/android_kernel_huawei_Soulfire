@@ -28,6 +28,7 @@
 #include <linux/of_gpio.h>
 #include <linux/regulator/consumer.h>
 #include <linux/mfd/wcd9xxx/pdata.h>
+#include <linux/mfd/wcd9xxx/core.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
@@ -530,10 +531,22 @@ static int msm8x10_wcd_readable(struct snd_soc_codec *ssc, unsigned int reg)
 	return msm8x10_wcd_reg_readable[reg];
 }
 
-static int msm8x10_wcd_write(struct snd_soc_codec *codec, unsigned int reg,
+#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
+extern int snd_hax_reg_access(unsigned int);
+extern unsigned int snd_hax_cache_read(unsigned int);
+extern void snd_hax_cache_write(unsigned int, unsigned int);
+#endif
+
+#ifndef CONFIG_SOUND_CONTROL_HAX_3_GPL
+static
+#endif
+int msm8x10_wcd_write(struct snd_soc_codec *codec, unsigned int reg,
 			     unsigned int value)
 {
 	int ret;
+#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
+	int val;
+#endif
 	dev_dbg(codec->dev, "%s: Write from reg 0x%x\n", __func__, reg);
 	if (reg == SND_SOC_NOPM)
 		return 0;
@@ -546,11 +559,28 @@ static int msm8x10_wcd_write(struct snd_soc_codec *codec, unsigned int reg,
 			dev_err(codec->dev, "Cache write to %x failed: %d\n",
 				reg, ret);
 	}
-
+#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
+	if (!snd_hax_reg_access(reg)) {
+		if (!((val = snd_hax_cache_read(reg)) != -1)) {
+			val = wcd9xxx_reg_read_safe(codec->control_data, reg);
+		}
+	} else {
+		snd_hax_cache_write(reg, value);
+		val = value;
+	}
+	return __msm8x10_wcd_reg_write(codec->control_data, reg, val);
+#else
 	return __msm8x10_wcd_reg_write(codec->control_data, reg, (u8)value);
+#endif
 }
+#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
+EXPORT_SYMBOL(msm8x10_wcd_write);
+#endif
 
-static unsigned int msm8x10_wcd_read(struct snd_soc_codec *codec,
+#ifndef CONFIG_SOUND_CONTROL_HAX_3_GPL
+static
+#endif
+unsigned int msm8x10_wcd_read(struct snd_soc_codec *codec,
 				unsigned int reg)
 {
 	unsigned int val;
@@ -576,7 +606,9 @@ static unsigned int msm8x10_wcd_read(struct snd_soc_codec *codec,
 	val = __msm8x10_wcd_reg_read(codec->control_data, reg);
 	return val;
 }
-
+#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
+EXPORT_SYMBOL(msm8x10_wcd_read);
+#endif
 
 static int msm8x10_wcd_dt_parse_vreg_info(struct device *dev,
 	struct msm8x10_wcd_regulator *vreg, const char *vreg_name,
@@ -1197,9 +1229,6 @@ static const struct snd_kcontrol_new msm8x10_wcd_snd_controls[] = {
 			  MSM8X10_WCD_A_CDC_IIR1_GAIN_B4_CTL,
 			  -84,	40, digital_gain),
 
-	SOC_SINGLE_TLV("ADC1 Volume", MSM8X10_WCD_A_TX_1_EN, 2, 19, 0, analog_gain),
-	SOC_SINGLE_TLV("ADC2 Volume", MSM8X10_WCD_A_TX_2_EN, 2, 19, 0, analog_gain),
-	SOC_SINGLE_TLV("ADC3 Volume", MSM8X10_WCD_A_TX_3_EN, 2, 19, 0, analog_gain),
 	SOC_ENUM("TX1 HPF cut off", cf_dec1_enum),
 	SOC_ENUM("TX2 HPF cut off", cf_dec2_enum),
 
@@ -2780,11 +2809,13 @@ static int msm8x10_wcd_enable_ext_mb_source(struct snd_soc_codec *codec,
 	return ret;
 }
 
+#ifndef CONFIG_SND_SOC_TPA6165A2
 static void msm8x10_wcd_micb_internal(struct snd_soc_codec *codec, bool on)
 {
 	snd_soc_update_bits(codec, MSM8X10_WCD_A_MICB_1_INT_RBIAS,
 			    0x1C, on ? 0x14 : 0x00);
 }
+#endif
 
 static void msm8x10_wcd_enable_mb_vddio(struct snd_soc_codec *codec, bool on)
 {
@@ -3190,6 +3221,13 @@ done:
 	return rc;
 }
 
+#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
+struct snd_kcontrol_new *gpl_faux_snd_controls_ptr =
+		(struct snd_kcontrol_new *)msm8x10_wcd_snd_controls;
+struct snd_soc_codec *fauxsound_codec_ptr;
+EXPORT_SYMBOL(fauxsound_codec_ptr);
+#endif
+
 static int msm8x10_wcd_codec_probe(struct snd_soc_codec *codec)
 {
 	struct msm8x10_wcd_priv *msm8x10_wcd_priv;
@@ -3197,6 +3235,11 @@ static int msm8x10_wcd_codec_probe(struct snd_soc_codec *codec)
 	struct wcd9xxx_core_resource *core_res;
 	int i, ret = 0;
 	struct msm8x10_wcd_pdata *pdata;
+
+#ifdef CONFIG_SOUND_CONTROL_HAX_3_GPL
+	pr_info("msm8x10_wcd codec probe...\n");
+	fauxsound_codec_ptr = codec;
+#endif
 
 	dev_dbg(codec->dev, "%s()\n", __func__);
 
@@ -3260,6 +3303,7 @@ static int msm8x10_wcd_codec_probe(struct snd_soc_codec *codec)
 				on_demand_supply_name[ON_DEMAND_MICBIAS]);
 	atomic_set(&msm8x10_wcd_priv->on_demand_list[ON_DEMAND_MICBIAS].ref, 0);
 
+#ifndef CONFIG_SND_SOC_TPA6165A2
 	ret = wcd9xxx_mbhc_init(&msm8x10_wcd_priv->mbhc,
 				&msm8x10_wcd_priv->resmgr,
 				codec, NULL, &mbhc_cb, &cdc_intr_ids,
@@ -3269,6 +3313,7 @@ static int msm8x10_wcd_codec_probe(struct snd_soc_codec *codec)
 			__func__);
 		goto exit_probe;
 	}
+#endif
 
 	/* Handle the Pdata */
 	ret = msm8x10_wcd_handle_pdata(codec, pdata);
