@@ -73,11 +73,27 @@
 
 #define KGSL_LOG_LEVEL_DEFAULT 3
 
+ /*
+ * The default values for the simpleondemand governor are 90 and 5,
+ * we use different values here.
+ * They have to be tuned and compare with the tz governor anyway.
+ */
+static struct devfreq_simple_ondemand_data adreno_ondemand_data = {
+	.upthreshold = 80,
+	.downdifferential = 20,
+};
+
+static const struct devfreq_governor_data adreno_governors[] = {
+	{ .name = "simple_ondemand", .data = &adreno_ondemand_data },
+};
+
 static const struct kgsl_functable adreno_functable;
 
 static struct adreno_device device_3d0 = {
 	.dev = {
 		KGSL_DEVICE_COMMON_INIT(device_3d0.dev),
+		.pwrscale = KGSL_PWRSCALE_INIT(adreno_governors,
+					ARRAY_SIZE(adreno_governors)),
 		.name = DEVICE_3D0_NAME,
 		.id = KGSL_DEVICE_3D0,
 		.mh = {
@@ -1636,8 +1652,7 @@ adreno_probe(struct platform_device *pdev)
 
 	adreno_ft_init_sysfs(device);
 
-	kgsl_pwrscale_init(device);
-	kgsl_pwrscale_attach_policy(device, ADRENO_DEFAULT_PWRSCALE_POLICY);
+	kgsl_pwrscale_init(&pdev->dev, CONFIG_MSM_ADRENO_DEFAULT_GOVERNOR);
 
 	device->flags &= ~KGSL_FLAGS_SOFT_RESET;
 	pdata = kgsl_device_get_drvdata(device);
@@ -1665,7 +1680,6 @@ static int __devexit adreno_remove(struct platform_device *pdev)
 	adreno_coresight_remove(pdev);
 	adreno_profile_close(device);
 
-	kgsl_pwrscale_detach_policy(device);
 	kgsl_pwrscale_close(device);
 
 	adreno_ringbuffer_close(&adreno_dev->ringbuffer);
@@ -4139,7 +4153,8 @@ static void adreno_power_stats(struct kgsl_device *device,
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
 	unsigned int cycles = 0;
-
+  
+	memset(stats, 0, sizeof(*stats));
 	/*
 	 * Get the busy cycles counted since the counter was last reset.
 	 * If we're not currently active, there shouldn't have been
@@ -4148,22 +4163,8 @@ static void adreno_power_stats(struct kgsl_device *device,
 	if (device->state == KGSL_STATE_ACTIVE)
 		cycles = adreno_dev->gpudev->busy_cycles(adreno_dev);
 
-	/*
-	 * In order to calculate idle you have to have run the algorithm
-	 * at least once to get a start time.
-	 */
-	if (pwr->time != 0) {
-		s64 tmp = ktime_to_us(ktime_get());
-		stats->total_time = tmp - pwr->time;
-		pwr->time = tmp;
-		stats->busy_time = adreno_ticks_to_us(cycles, device->pwrctrl.
-				pwrlevels[device->pwrctrl.active_pwrlevel].
-				gpu_freq);
-	} else {
-		stats->total_time = 0;
-		stats->busy_time = 0;
-		pwr->time = ktime_to_us(ktime_get());
-	}
+	stats->busy_time = adreno_ticks_to_us(cycles,
+					      kgsl_pwrctrl_active_freq(pwr));
 }
 
 void adreno_irqctrl(struct kgsl_device *device, unsigned int mask)
